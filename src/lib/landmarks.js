@@ -82,18 +82,21 @@ export const HAND = {
  *        عرض از مقیاس دست گرفته می‌شود نه از طول بند، چون وقتی انگشت به سمت
  *        دوربین می‌چرخد طول بند کوتاه دیده می‌شود ولی عرض ناخن تقریباً ثابت است.
  * `lenK` طول ناخن نسبت به فاصلهٔ DIP تا نوک (این یکی باید با چرخش کوتاه شود).
- * `along` مرکز ناخن روی همان پاره (۰ = مفصل، ۱ = نوک). با `lenK` طوری جفت
- *        شده که لبهٔ آزادِ ناخن روی خودِ نوک انگشت تمام شود نه بعد از آن:
- *        `along + lenK/2 ≈ ۱`. اگر این را به‌هم بزنی، لاک از سرِ انگشت
- *        بیرون می‌زند.
  * `ratio` بیشینهٔ نسبت طول به عرض؛ جلوی کشیده‌شدن بیش از حد را می‌گیرد.
+ *
+ * جای ناخن از نوک انگشت لنگر می‌گیرد، نه از مفصل: لبهٔ آزاد کمی عقب‌تر از
+ * نقطهٔ نوک می‌نشیند و ناخن از همان‌جا به عقب کشیده می‌شود (`TIP_INSET` در
+ * `nailRenderer`). قبلاً مرکز ناخن روی درصدی از پارهٔ مفصل→نوک گذاشته می‌شد و
+ * چون طول ناخن سقف دارد و با چرخش انگشت کوتاه می‌شود، هر خطای طول، لاک را از
+ * روی ناخن به سمت بند انگشت پایین می‌آورد. با لنگرِ نوک، لبه همیشه سرِ جایش
+ * است و فقط طول کم و زیاد می‌شود.
  */
 export const NAIL_FINGERS = [
-  { key: 'thumb', dip: HAND.THUMB_IP, tip: HAND.THUMB_TIP, base: HAND.THUMB_MCP, tune: { along: 0.63, lenK: 0.64, wK: 0.2, ratio: 1.35 } },
-  { key: 'index', dip: HAND.INDEX_DIP, tip: HAND.INDEX_TIP, base: HAND.INDEX_PIP, tune: { along: 0.65, lenK: 0.66, wK: 0.168, ratio: 1.5 } },
-  { key: 'middle', dip: HAND.MIDDLE_DIP, tip: HAND.MIDDLE_TIP, base: HAND.MIDDLE_PIP, tune: { along: 0.65, lenK: 0.66, wK: 0.172, ratio: 1.5 } },
-  { key: 'ring', dip: HAND.RING_DIP, tip: HAND.RING_TIP, base: HAND.RING_PIP, tune: { along: 0.65, lenK: 0.66, wK: 0.158, ratio: 1.5 } },
-  { key: 'pinky', dip: HAND.PINKY_DIP, tip: HAND.PINKY_TIP, base: HAND.PINKY_PIP, tune: { along: 0.65, lenK: 0.66, wK: 0.132, ratio: 1.5 } },
+  { key: 'thumb', dip: HAND.THUMB_IP, tip: HAND.THUMB_TIP, base: HAND.THUMB_MCP, tune: { lenK: 0.62, wK: 0.176, ratio: 1.3 } },
+  { key: 'index', dip: HAND.INDEX_DIP, tip: HAND.INDEX_TIP, base: HAND.INDEX_PIP, tune: { lenK: 0.62, wK: 0.148, ratio: 1.35 } },
+  { key: 'middle', dip: HAND.MIDDLE_DIP, tip: HAND.MIDDLE_TIP, base: HAND.MIDDLE_PIP, tune: { lenK: 0.62, wK: 0.152, ratio: 1.35 } },
+  { key: 'ring', dip: HAND.RING_DIP, tip: HAND.RING_TIP, base: HAND.RING_PIP, tune: { lenK: 0.62, wK: 0.139, ratio: 1.35 } },
+  { key: 'pinky', dip: HAND.PINKY_DIP, tip: HAND.PINKY_TIP, base: HAND.PINKY_PIP, tune: { lenK: 0.62, wK: 0.116, ratio: 1.35 } },
 ]
 
 /* -------------------------------------------------------------------- بدن */

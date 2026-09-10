@@ -22,6 +22,10 @@ const FACING_SMOOTH = 0.18
 
 const FINISH_GLOSS = { matte: 0.1, satin: 0.34, glossy: 0.72 }
 
+/* لبهٔ آزادِ ناخن چقدر عقب‌تر از نقطهٔ نوک بنشیند، نسبت به طول ناخن — چون
+   گوشتِ سرِ انگشت کمی از ناخن جلوتر است. */
+const TIP_INSET = 0.12
+
 /** شکل ناخن («اسکوآل»): پایهٔ باریک‌تر با خط کوتیکول، پهلوهای کمی برجسته،
     نوک گرد. در فضای محلی: y از پایه (منفی) تا نوک (مثبت). */
 function nailPath(ctx, len, wid) {
@@ -200,9 +204,14 @@ function drawNail(ctx, lm, finger, item, frame, alpha, handScale) {
   const wid = Math.max(3, handScale * t.wK)
   const len = clamp(segLen * t.lenK, wid * 0.55, wid * t.ratio)
 
+  /* لنگر روی نوک انگشت است نه روی مفصل: لبهٔ آزاد همان‌جا می‌نشیند و ناخن از
+     آن به عقب کشیده می‌شود. اگر مرکز را از مفصل حساب کنیم، هر کم و زیاد شدنِ
+     طول (سقفِ نسبت، یا کوتاه شدن با چرخش انگشت) لاک را از روی ناخن به سمت
+     بند انگشت سُر می‌دهد. */
   const ang = Math.atan2(tip.y - dip.y, tip.x - dip.x)
-  const cx = dip.x + (tip.x - dip.x) * t.along
-  const cy = dip.y + (tip.y - dip.y) * t.along
+  const back = len * (0.5 + TIP_INSET)
+  const cx = tip.x - Math.cos(ang) * back
+  const cy = tip.y - Math.sin(ang) * back
 
   const rgb = hexToRgb(item.hex)
   const gloss = FINISH_GLOSS[item.finish] ?? FINISH_GLOSS.satin
