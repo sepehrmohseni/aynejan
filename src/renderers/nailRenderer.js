@@ -2,6 +2,7 @@ import { loadHandLandmarker } from '@/lib/mediapipe'
 import { LandmarkFilter } from '@/lib/oneEuro'
 import { HAND, NAIL_FINGERS } from '@/lib/landmarks'
 import { dist, clamp, hexToRgb, shade } from '@/lib/geom'
+import { handHint } from '@/lib/coach'
 
 /**
  * ناخن.
@@ -44,7 +45,9 @@ export function createNailRenderer() {
     new LandmarkFilter({ minCutOff: 1.4, beta: 0.1 }),
     new LandmarkFilter({ minCutOff: 1.4, beta: 0.1 }),
   ]
-  const facingSmooth = [0, 0]
+  // کلید بر اساس چپ/راست بودن دست، نه ترتیب در آرایه — چون ترتیب بین
+  // فریم‌ها جابه‌جا می‌شود و آن‌وقت نرم‌سازیِ یک دست روی دست دیگر می‌افتد.
+  const facingSmooth = new Map()
 
   return {
     id: 'nail',
@@ -56,8 +59,7 @@ export function createNailRenderer() {
 
     reset() {
       filters.forEach((f) => f.reset())
-      facingSmooth[0] = 0
-      facingSmooth[1] = 0
+      facingSmooth.clear()
     },
 
     detect(video, ts) {
@@ -73,11 +75,20 @@ export function createNailRenderer() {
       }
     },
 
-    hint(result) {
-      if (!result) return 'پشت دستت رو رو به دوربین بگیر'
-      const anyBack = result.hands.some((_, i) => facingSmooth[i] > BACK_FACING_MIN)
-      if (!anyBack) return 'دستت رو بچرخون؛ پشت دست رو به دوربین'
-      return null
+    hint(result, frame) {
+      if (!result?.hands?.length) return 'دستت رو بیار جلوی دوربین'
+      // بهترین دست را ملاک می‌گیریم: آن‌که بیشتر پشتش رو به دوربین است
+      let best = null
+      let bestFacing = -Infinity
+      result.hands.forEach((h, i) => {
+        const f = facingSmooth.get(h.handedness ?? `h${i}`) ?? 0
+        if (f > bestFacing) {
+          bestFacing = f
+          best = h
+        }
+      })
+      if (!best) return 'دستت رو بیار جلوی دوربین'
+      return handHint(best.landmarks, frame, { backFacing: bestFacing > BACK_FACING_MIN })
     },
 
     draw(ctx, result, item, frame) {
@@ -87,10 +98,17 @@ export function createNailRenderer() {
 
         /* پشت دست رو به دوربین است؟
            بردار عمود کف دست از ضرب خارجی (اشاره−مچ) × (کوچک−مچ) به دست می‌آید.
-           علامتِ مؤلفهٔ z می‌گوید کدام رو به دوربین است، و این علامت با دستِ
-           چپ/راست عوض می‌شود؛ پس با handedness تصحیح می‌شود. چون تصویر سلفی
-           آینه شده، برچسب handedness هم نسبت به دیدِ کاربر برعکس است و همین
-           برعکسی دقیقاً همان تصحیح لازم است. */
+           علامتِ مؤلفهٔ z می‌گوید کدام طرف رو به دوربین است، و این علامت با
+           چپ/راست بودن دست عوض می‌شود؛ پس با handedness تصحیح می‌شود.
+           
+           به مدل همیشه فریم خام داده می‌شود (نه نسخهٔ آینه‌شدهٔ روی صفحه)، پس
+           این قرارداد برای دوربین جلو و عقب یکسان است. روی عکس واقعی دستِ
+           پشت‌رو آزمایش و تأیید شده.
+
+           حالت آینه هم درست کار می‌کند: اگر کاربر دوربین پشت را رو به آینه
+           بگیرد، هم ضرب خارجی علامت عوض می‌کند و هم برچسب چپ/راست؛ دو
+           تغییرِ علامت همدیگر را خنثی می‌کنند و نتیجه دست‌نخورده می‌ماند.
+           (با همان عکس، آینه‌شده، آزمایش شد.) */
         const w = lm[HAND.WRIST]
         const idx = lm[HAND.INDEX_MCP]
         const pky = lm[HAND.PINKY_MCP]
@@ -103,12 +121,11 @@ export function createNailRenderer() {
         const sign = hand.handedness === 'Left' ? -1 : 1
         const facing = (cross / scale) * sign
 
-        facingSmooth[i] += (facing - facingSmooth[i]) * FACING_SMOOTH
-        const strength = clamp(
-          (facingSmooth[i] - BACK_FACING_MIN) / 0.22,
-          0,
-          1
-        )
+        const key = hand.handedness ?? `h${i}`
+        const prev = facingSmooth.get(key) ?? facing
+        const smooth = prev + (facing - prev) * FACING_SMOOTH
+        facingSmooth.set(key, smooth)
+        const strength = clamp((smooth - BACK_FACING_MIN) / 0.22, 0, 1)
         if (strength <= 0.01) return
 
         const alpha = strength * frame.alpha
@@ -148,7 +165,9 @@ export function createNailRenderer() {
         const wr = frame.map(lm[HAND.WRIST])
         ctx.fillStyle = '#F7E9EC'
         ctx.fillText(
-          `${hand.handedness ?? '?'} facing=${facingSmooth[i].toFixed(2)}`,
+          `${hand.handedness ?? '?'} facing=${(
+            facingSmooth.get(hand.handedness ?? `h${i}`) ?? 0
+          ).toFixed(2)}`,
           wr.x - 30,
           wr.y + 18
         )

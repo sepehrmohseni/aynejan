@@ -1,6 +1,7 @@
 import { loadFaceLandmarker } from '@/lib/mediapipe'
 import { LandmarkFilter } from '@/lib/oneEuro'
 import { LIPS_OUTER, LIPS_INNER } from '@/lib/landmarks'
+import { faceHint } from '@/lib/coach'
 import {
   closedSpline,
   bbox,
@@ -78,14 +79,16 @@ export function createLipRenderer() {
       return { landmarks: filter.apply(lm, ts) }
     },
 
-    /** راهنمای فارسی بر اساس وضعیت ردیابی. */
+    /** راهنمای فارسی بر اساس وضعیت ردیابی و کادربندی. */
     hint(result, frame) {
-      if (!result) return 'صورتت رو وسط کادر بیار'
+      if (!result) return 'صورتت رو بیار توی کادر'
       const lm = result.landmarks
+      const framing = faceHint(lm, frame)
+      if (framing) return framing
+      // اگر دهان خیلی کوچک دیده شود، لبه‌ها دقیق درنمی‌آیند
       const a = frame.map(lm[LIPS_OUTER[I_CORNER_A]])
       const b = frame.map(lm[LIPS_OUTER[I_CORNER_B]])
-      const w = dist(a, b)
-      if (w < frame.W * 0.055) return 'یه‌کم به دوربین نزدیک‌تر شو'
+      if (dist(a, b) < frame.W * 0.075) return 'یه‌کم بیا نزدیک‌تر'
       return null
     },
 

@@ -1,5 +1,6 @@
 import { ref, shallowRef, onBeforeUnmount } from 'vue'
-import { clamp } from '@/lib/geom'
+import { clamp, offscreen } from '@/lib/geom'
+import { meanLuma } from '@/lib/coach'
 
 /**
  * حلقهٔ پرو.
@@ -17,6 +18,8 @@ const DROP_AT = 0.02 // زیر این مقدار، نتیجهٔ قدیمی دو�
 const STABLE_MS = 900 // پس از این مدت ردیابیِ پیوسته، راهنما پنهان می‌شود
 // اگر دستگاه ضعیف بود، تشخیص یک‌درمیان اجرا می‌شود ولی پوشش هر فریم کشیده
 // می‌شود؛ فیلتر One Euro فاصله را نرم پر می‌کند، پس تصویر روان می‌ماند.
+// بیشترین بزرگ‌نمایی مجاز برای بالا آوردن سوژه از پشت نوار کنترل‌ها
+const MAX_BIAS_ZOOM = 1.22
 const SLOW_FRAME_MS = 42
 const FAST_FRAME_MS = 26
 
@@ -33,6 +36,8 @@ export function useTryOnLoop({
   const detected = ref(false)
   const debug = ref(false)
   const fps = ref(0)
+  /** نور صحنه کم است؟ روی دقت تشخیص اثر مستقیم دارد. */
+  const lowLight = ref(false)
 
   let raf = 0
   let lastResult = null
@@ -45,6 +50,13 @@ export function useTryOnLoop({
   let lastTs = 0
   let detectEvery = 1
   let frameNo = 0
+  // اگر رندرر پشت‌سرهم خطا داد، پوشش خاموش می‌شود ولی تصویر دوربین و دکمهٔ
+  // عکس سرِ جایشان می‌مانند؛ بهتر از این است که کل صفحه بخوابد.
+  let failures = 0
+  const MAX_FAILURES = 12
+  // نمونه‌گیری روشنایی: یک بوم ۲۴×۲۴ هر نیم‌ثانیه، هزینه‌اش عملاً صفر است
+  const lumaSampler = offscreen(24, 24)
+  let lumaAt = 0
   const frame = shallowRef(null)
 
   /**
@@ -87,9 +99,17 @@ export function useTryOnLoop({
     const strip = Math.round((safeCss / boxH) * H)
     const VH = Math.max(1, H - strip)
 
-    // ویدیو در وضوح اصلی کشیده می‌شود؛ سرریزش بیرون بوم می‌افتد و بریده می‌شود
-    const dx = Math.round((W - vw) / 2)
-    const dy = clamp(Math.round((VH - vh) / 2), H - vh, 0)
+    /* تصویر باید طوری بنشیند که مرکزش وسطِ ناحیهٔ دیده‌شونده بیفتد، نه وسط
+       صفحه — وگرنه چانه یا نوک انگشت پشت نوار کنترل‌ها گم می‌شود.
+       اگر ارتفاع ویدیو دقیقاً اندازهٔ بوم باشد، جایی برای جابه‌جایی نیست؛
+       آن‌وقت به اندازهٔ لازم (و حداکثر تا سقف مشخص) کمی بزرگ‌نمایی می‌کنیم
+       تا فضای جابه‌جایی ساخته شود. */
+    const shift = (H - VH) / 2
+    const z = clamp((H + shift) / vh, 1, MAX_BIAS_ZOOM)
+    const dw = Math.round(vw * z)
+    const dh = Math.round(vh * z)
+    const dx = Math.round((W - dw) / 2)
+    const dy = clamp(Math.round((VH - dh) / 2), H - dh, 0)
 
     if (canvas.width !== W || canvas.height !== H) {
       canvas.width = W
@@ -102,7 +122,7 @@ export function useTryOnLoop({
       H,
       VH,
       src: { x: 0, y: 0, w: vw, h: vh },
-      dst: { x: dx, y: dy, w: vw, h: vh },
+      dst: { x: dx, y: dy, w: dw, h: dh },
     }
   }
 
@@ -185,19 +205,20 @@ export function useTryOnLoop({
             lastResult = null
           }
         } catch (err) {
-          console.warn('[aynejan] detect failed', err)
+          if (failures++ < 3) console.warn('[aynejan] detect failed', err)
         }
       }
 
       // ۳) پوشش
       const f = makeFrame(geom, mirror, Math.min(1, presence * 1.25))
       frame.value = f
-      if (lastResult && presence > DROP_AT) {
+      if (lastResult && presence > DROP_AT && failures < MAX_FAILURES) {
         try {
           renderer.draw(ctx, lastResult, getItem(), f)
           if (debug.value) renderer.drawDebug?.(ctx, lastResult, f)
+          failures = 0
         } catch (err) {
-          console.warn('[aynejan] draw failed', err)
+          if (failures++ < 3) console.warn('[aynejan] draw failed', err)
         }
       } else if (debug.value && lastResult) {
         renderer.drawDebug?.(ctx, lastResult, f)
@@ -213,7 +234,9 @@ export function useTryOnLoop({
       }
       const stable = stableSince && ts - stableSince > STABLE_MS
       const h = renderer.hint?.(presence > 0.4 ? lastResult : null, f) ?? null
-      hint.value = stable && !h ? null : h
+      // وقتی نور کم است و ردیابی هم نگرفته، ریشهٔ مشکل نور است نه کادربندی
+      const coached = lowLight.value && !isOn ? 'نور کم است؛ رو به نور بایست' : h
+      hint.value = stable && !coached ? null : coached
     }
 
     // میانگین نرم زمان فریم، برای تصمیمِ کاهش یا برگرداندن نرخ تشخیص
@@ -221,6 +244,17 @@ export function useTryOnLoop({
     lastTs = ts
     if (avgFrameMs > SLOW_FRAME_MS) detectEvery = 2
     else if (avgFrameMs < FAST_FRAME_MS) detectEvery = 1
+
+    if (ts - lumaAt > 500) {
+      lumaAt = ts
+      try {
+        const l = meanLuma(ctx, canvas, lumaSampler)
+        // آستانه‌ها با فاصله، تا نزدیک مرز چشمک نزند
+        lowLight.value = l < (lowLight.value ? 0.2 : 0.14)
+      } catch {
+        lowLight.value = false
+      }
+    }
 
     frames++
     if (ts - fpsAt > 1000) {
@@ -253,6 +287,7 @@ export function useTryOnLoop({
     lastTs = 0
     detectEvery = 1
     frameNo = 0
+    failures = 0
   }
 
   /**
@@ -278,5 +313,17 @@ export function useTryOnLoop({
 
   onBeforeUnmount(stop)
 
-  return { running, hint, detected, debug, fps, frame, start, stop, resetTracking, capture }
+  return {
+    running,
+    hint,
+    detected,
+    debug,
+    fps,
+    lowLight,
+    frame,
+    start,
+    stop,
+    resetTracking,
+    capture,
+  }
 }

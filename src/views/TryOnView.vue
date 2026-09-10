@@ -26,6 +26,12 @@ const FACTORIES = {
 }
 
 const cat = computed(() => categoryById(props.category))
+
+/* بازگشت همیشه به صفحهٔ انتخاب همان دسته می‌رود. اگر کاربر لینک مستقیم را
+   باز کرده باشد، `router.back()` او را از اپ بیرون می‌برد؛ این نه. */
+function goBack() {
+  router.push({ name: 'picker', params: { category: props.category } })
+}
 const items = computed(() => itemsOf(props.category))
 const current = ref(itemById(props.category, props.item) ?? items.value[0] ?? null)
 
@@ -79,6 +85,29 @@ async function bootModel() {
   }
 }
 
+/* صفحه نباید وسط پرو خاموش شود. اگر مرورگر پشتیبانی نکند، بی‌سروصدا رد می‌شود. */
+let wakeLock = null
+async function keepAwake() {
+  try {
+    if ('wakeLock' in navigator && !wakeLock) {
+      wakeLock = await navigator.wakeLock.request('screen')
+      wakeLock.addEventListener?.('release', () => {
+        wakeLock = null
+      })
+    }
+  } catch {
+    /* اجازه نداد یا پشتیبانی نمی‌شود */
+  }
+}
+function releaseAwake() {
+  try {
+    wakeLock?.release?.()
+  } catch {
+    /* مهم نیست */
+  }
+  wakeLock = null
+}
+
 function measureBottom() {
   const el = bottomRef.value
   if (!el) return
@@ -98,12 +127,14 @@ onMounted(async () => {
   scrollActiveIntoView('auto')
   await camera.start('user')
   loop.start()
+  keepAwake()
   await bootModel()
 })
 
 onBeforeUnmount(() => {
   loop.stop()
   camera.stop()
+  releaseAwake()
   bottomObserver?.disconnect()
   window.removeEventListener('orientationchange', measureBottom)
   window.removeEventListener('resize', measureBottom)
@@ -111,7 +142,12 @@ onBeforeUnmount(() => {
 
 // اگر صفحه پنهان شد، دوربین بسته می‌شود؛ با برگشت دوباره باز می‌شود.
 const onVisible = async () => {
-  if (!document.hidden && !camera.ready.value && !camera.error.value) {
+  if (document.hidden) {
+    releaseAwake()
+    return
+  }
+  keepAwake()
+  if (!camera.ready.value && !camera.error.value) {
     await camera.start()
     loop.resetTracking()
   }
@@ -210,7 +246,7 @@ const busyPct = computed(() =>
 
     <!-- نوار بالا -->
     <div class="top">
-      <button class="round on-camera tap" type="button" aria-label="بازگشت" @click="router.back()">
+      <button class="round on-camera tap" type="button" aria-label="بازگشت" @click="goBack">
         <v-icon icon="mdi-chevron-right" size="24" />
       </button>
       <button
@@ -495,7 +531,7 @@ const busyPct = computed(() =>
   position: absolute;
   inset-inline: 0;
   bottom: 0;
-  padding: 14px 12px calc(var(--safe-b) + 14px);
+  padding: 10px 12px calc(var(--safe-b) + 10px);
   /* بالای نوار یک محو شدن نرم، پایینش تیرهٔ توپر — چون تصویر دوربین اصلاً
      زیر این نوار نمی‌آید، لبه نباید سخت دیده شود. */
   background: linear-gradient(
@@ -507,7 +543,7 @@ const busyPct = computed(() =>
   );
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 6px;
 }
 .float-row {
   position: absolute;
@@ -536,7 +572,7 @@ const busyPct = computed(() =>
   display: flex;
   gap: 20px;
   overflow-x: auto;
-  padding: 10px 18px;
+  padding: 8px 18px;
   scroll-snap-type: x proximity;
   scroll-padding-inline: 14px;
   /* محو شدن نرم دو سر نوار، تا معلوم باشد ادامه دارد */
@@ -604,8 +640,8 @@ const busyPct = computed(() =>
   transform: translateY(5px);
 }
 .shutter {
-  width: 76px;
-  height: 76px;
+  width: 70px;
+  height: 70px;
   border-radius: 50%;
   border: 0;
   background: none;
@@ -625,8 +661,8 @@ const busyPct = computed(() =>
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
 }
 .core {
-  width: 62px;
-  height: 62px;
+  width: 57px;
+  height: 57px;
   border-radius: 50%;
   /* سفیدِ شیری، نه رنگِ محصول — تا با سواچ‌های رنگی اشتباه گرفته نشود */
   background: linear-gradient(160deg, #ffffff, #f2e7ea 62%, #e6d6dc);

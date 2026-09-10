@@ -1,6 +1,7 @@
 import { loadPoseLandmarker, loadSegmenter } from '@/lib/mediapipe'
 import { LandmarkFilter } from '@/lib/oneEuro'
 import { POSE } from '@/lib/landmarks'
+import { bodyHint } from '@/lib/coach'
 import { dist, offscreen, clamp } from '@/lib/geom'
 
 /**
@@ -198,14 +199,17 @@ export function createGarmentRenderer() {
     needs: 'pose',
 
     async init(onProgress) {
-      pose = await loadPoseLandmarker(onProgress)
-      try {
-        segmenter = await loadSegmenter()
-      } catch (err) {
+      /* هر دو مدل هم‌زمان گرفته می‌شوند، نه پشت سر هم — لباس تنها دسته‌ای است
+         که دو مدل لازم دارد و پشت‌سرهم گرفتنشان انتظار را دو برابر می‌کرد. */
+      const posePromise = loadPoseLandmarker(onProgress)
+      const segPromise = loadSegmenter().catch((err) => {
         // بدون قطعه‌بندی هم کار می‌کند، فقط سر جلوی لباس نمی‌آید
         console.warn('[aynejan] segmenter unavailable', err)
-        segmenter = null
-      }
+        return null
+      })
+      const [p, seg] = await Promise.all([posePromise, segPromise])
+      pose = p
+      segmenter = seg
     },
 
     reset() {
@@ -253,20 +257,9 @@ export function createGarmentRenderer() {
       return { landmarks: smoothed }
     },
 
-    hint(result) {
+    hint(result, frame) {
       if (!result) return 'کمی عقب‌تر برو تا شونه‌هات دیده بشه'
-      const lm = result.landmarks
-      const vis = (i) => lm[i]?.visibility ?? 1
-      if (vis(POSE.LEFT_SHOULDER) < MIN_VIS || vis(POSE.RIGHT_SHOULDER) < MIN_VIS)
-        return 'کمی عقب‌تر برو تا شونه‌هات دیده بشه'
-      if (
-        vis(POSE.LEFT_HIP) < MIN_VIS ||
-        vis(POSE.RIGHT_HIP) < MIN_VIS ||
-        lm[POSE.LEFT_HIP].y > IN_FRAME ||
-        lm[POSE.RIGHT_HIP].y > IN_FRAME
-      )
-        return 'کمی عقب‌تر برو تا کمرت هم توی کادر بیاد'
-      return null
+      return bodyHint(result.landmarks, frame, POSE)
     },
 
     draw(ctx, result, item, frame) {

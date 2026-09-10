@@ -31,6 +31,7 @@ export const CATEGORIES = [
     subtitle: 'مانتو، شومیز، تیشرت، هودی',
     hint: 'کمی عقب‌تر برو تا شونه‌ها و کمرت دیده بشه',
     icon: 'mdi-tshirt-crew-outline',
+    accent: '#D94F74',
   },
   {
     id: 'lip',
@@ -38,6 +39,7 @@ export const CATEGORIES = [
     subtitle: 'شانزده رنگ، سه پرداخت',
     hint: 'صورتت رو وسط کادر بیار',
     icon: 'mdi-lipstick',
+    accent: '#B4234C',
   },
   {
     id: 'nail',
@@ -45,6 +47,7 @@ export const CATEGORIES = [
     subtitle: 'لاک با پرداخت مات و براق',
     hint: 'پشت دستت رو رو به دوربین بگیر',
     icon: 'mdi-hand-back-right-outline',
+    accent: '#E8A33D',
   },
   {
     id: 'lens',
@@ -52,6 +55,7 @@ export const CATEGORIES = [
     subtitle: 'شش رنگ طبیعی',
     hint: 'صورتت رو وسط کادر بیار و مستقیم نگاه کن',
     icon: 'mdi-eye-outline',
+    accent: '#2E9C93',
   },
 ]
 

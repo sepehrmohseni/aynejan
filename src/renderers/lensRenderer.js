@@ -8,6 +8,7 @@ import {
   EYE_OPEN_PROBE,
   FACE_WITH_IRIS,
 } from '@/lib/landmarks'
+import { faceHint } from '@/lib/coach'
 import {
   closedSpline,
   centroid,
@@ -253,10 +254,23 @@ export function createLensRenderer() {
     },
 
     hint(result, frame) {
-      if (!result) return 'صورتت رو وسط کادر بیار و مستقیم نگاه کن'
+      if (!result) return 'صورتت رو بیار توی کادر و مستقیم نگاه کن'
       const lm = result.landmarks
-      const w = dist(frame.map(lm[33]), frame.map(lm[263]))
-      if (w < frame.W * 0.16) return 'یه‌کم به دوربین نزدیک‌تر شو'
+
+      // چشم بسته؟ آن‌وقت لنز اصلاً دیده نمی‌شود و باید گفت چرا
+      const openOf = (probe) => {
+        const w = dist(frame.map(lm[probe.inner]), frame.map(lm[probe.outer]))
+        return w > 0 ? dist(frame.map(lm[probe.top]), frame.map(lm[probe.bottom])) / w : 0
+      }
+      const eyesClosed =
+        openOf(EYE_OPEN_PROBE.left) < CLOSED_RATIO && openOf(EYE_OPEN_PROBE.right) < CLOSED_RATIO
+
+      const framing = faceHint(lm, frame, { eyesClosed })
+      if (framing) return framing
+
+      // عنبیه باید به اندازهٔ کافی بزرگ دیده شود وگرنه بافت لنز حروم می‌شود
+      if (dist(frame.map(lm[33]), frame.map(lm[263])) < frame.W * 0.24)
+        return 'یه‌کم بیا نزدیک‌تر تا چشمات بهتر دیده بشه'
       return null
     },
 
