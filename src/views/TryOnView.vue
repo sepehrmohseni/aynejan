@@ -56,7 +56,62 @@ const loop = useTryOnLoop({
   getItem: () => current.value,
   isMirrored: camera.isMirrored,
   getSafeBottom: () => safeBottom.value,
+  getZoom: () => camera.digitalZoom.value,
 })
+
+/* ------------------------------------------------------------ بزرگ‌نمایی */
+/* پله‌ها همان‌هایی‌اند که در دوربین گوشی هم هست، تا آشنا باشد. با هر زدنِ
+   دکمه یک پله جلو می‌رود و از آخری به ۱× برمی‌گردد. */
+const ZOOM_STEPS = [1, 1.5, 2, 3]
+
+function cycleZoom() {
+  const next = ZOOM_STEPS.find((z) => z > camera.zoom.value + 0.01)
+  camera.setZoom(next ?? ZOOM_STEPS[0])
+}
+
+const zoomLabel = computed(() => {
+  const z = camera.zoom.value
+  return fa(Number.isInteger(z) ? String(z) : z.toFixed(1)).replace('.', '٫')
+})
+
+/* دو انگشت روی تصویر هم بزرگ‌نمایی می‌کند — چیزی که هر کسی از یک دوربین
+   انتظار دارد و لازم نیست جایی نوشته شود. */
+const touches = new Map()
+let pinchFrom = 0
+let pinchZoom = 1
+
+function onPinchStart(e) {
+  if (e.pointerType === 'mouse') return
+  touches.set(e.pointerId, e)
+  // انگشت را نگه می‌داریم تا اگر از روی بوم بیرون رفت، حرکت نصفه نماند
+  try {
+    e.currentTarget.setPointerCapture(e.pointerId)
+  } catch {
+    /* مرورگر اجازه نداد؛ بدون این هم کار می‌کند */
+  }
+}
+function onPinchMove(e) {
+  if (!touches.has(e.pointerId)) return
+  touches.set(e.pointerId, e)
+  if (touches.size !== 2) return
+  const [a, b] = [...touches.values()]
+  const span = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY)
+  if (!pinchFrom) {
+    pinchFrom = span
+    pinchZoom = camera.zoom.value
+    return
+  }
+  if (span > 0) camera.setZoom(pinchZoom * (span / pinchFrom))
+}
+function onPinchEnd(e) {
+  touches.delete(e.pointerId)
+  if (touches.size < 2) pinchFrom = 0
+  try {
+    e.currentTarget.releasePointerCapture(e.pointerId)
+  } catch {
+    /* از قبل رها شده */
+  }
+}
 
 const shotBlob = shallowRef(null)
 const showShot = ref(false)
@@ -241,7 +296,14 @@ const busyPct = computed(() =>
 <template>
   <main class="tryon">
     <video ref="videoRef" class="hidden-video" playsinline autoplay muted></video>
-    <canvas ref="canvasRef" class="stage"></canvas>
+    <canvas
+      ref="canvasRef"
+      class="stage"
+      @pointerdown="onPinchStart"
+      @pointermove="onPinchMove"
+      @pointerup="onPinchEnd"
+      @pointercancel="onPinchEnd"
+    ></canvas>
     <div v-if="flash" class="flash" aria-hidden="true"></div>
 
     <!-- نوار بالا -->
@@ -258,7 +320,10 @@ const busyPct = computed(() =>
         @contextmenu.prevent
       >
         {{ cat?.title }}
-        <span v-if="loop.debug.value" class="dbg">دیباگ · {{ fa(loop.fps.value) }}</span>
+        <span v-if="loop.debug.value" class="dbg">
+          دیباگ · {{ fa(loop.fps.value) }} ·
+          {{ camera.hasOpticalZoom.value ? 'زوم دوربین' : 'زوم نرم‌افزاری' }}
+        </span>
       </button>
       <span class="round-spacer" aria-hidden="true"></span>
     </div>
@@ -360,7 +425,14 @@ const busyPct = computed(() =>
           <span class="core"><v-icon icon="mdi-camera-iris" size="34" /></span>
         </button>
 
-        <span class="dock-btn ghost-slot" aria-hidden="true"></span>
+        <button
+          class="round on-camera tap dock-btn zoom"
+          type="button"
+          :aria-label="`تغییر بزرگ‌نمایی؛ الان ${zoomLabel} برابر`"
+          @click="cycleZoom"
+        >
+          <span dir="ltr">{{ zoomLabel }}×</span>
+        </button>
       </div>
     </div>
 
@@ -396,6 +468,8 @@ const busyPct = computed(() =>
   display: block;
   /* بوم دقیقاً به اندازهٔ برشی است که کشیده شده، پس کشیدگی ایجاد نمی‌شود */
   object-fit: fill;
+  /* تا حرکت دو انگشت به‌جای بزرگ‌نمایی، صفحه را نکشد */
+  touch-action: none;
 }
 .flash {
   position: absolute;
@@ -607,9 +681,10 @@ const busyPct = computed(() =>
 .dock-btn {
   justify-self: center;
 }
-.ghost-slot {
-  width: 44px;
-  height: 44px;
+.zoom {
+  font-weight: 700;
+  font-size: 15px;
+  line-height: 1;
 }
 .round-spacer {
   width: 44px;
