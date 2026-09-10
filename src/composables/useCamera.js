@@ -5,6 +5,16 @@ import { clamp } from '@/lib/geom'
 export const MAX_ZOOM = 3
 
 /**
+ * کف بزرگ‌نمایی، فقط روی دستگاه‌هایی که واقعاً لنز فوق‌عریض دارند.
+ *
+ * ۰٫۵ را نمی‌شود نرم‌افزاری ساخت: کوچک کردن تصویر روی بوم، کادر را بازتر
+ * نمی‌کند و فقط سوژه را ریز می‌کند. پس یا از خودِ دوربین گرفته می‌شود
+ * (بازهٔ zoom در اندروید) یا با عوض کردن لنز (دستگاه جداگانه در iOS)، و اگر
+ * هیچ‌کدام نبود این گزینه اصلاً نشان داده نمی‌شود.
+ */
+export const WIDE_ZOOM = 0.5
+
+/**
  * دوربین: گرفتن استریم، جابه‌جایی جلو/عقب، بزرگ‌نمایی، و خطاهای فارسی.
  * تصویر هیچ‌وقت از دستگاه بیرون نمی‌رود؛ اینجا هیچ درخواست شبکه‌ای نیست.
  */
@@ -20,6 +30,10 @@ export function useCamera(videoRef) {
   /** آن بخش از بزرگ‌نمایی که خودِ دوربین نتوانسته و حلقهٔ پرو باید انجام دهد. */
   const digitalZoom = ref(1)
   const hasOpticalZoom = ref(false)
+  /** کمترین بزرگ‌نمایی ممکن روی همین دستگاه: ۱ یا ۰٫۵. */
+  const minZoom = ref(1)
+  /** الان روی لنز فوق‌عریض هستیم؟ */
+  const onWideLens = ref(false)
 
   const isMirrored = () => facingMode.value === 'user'
 
@@ -62,8 +76,39 @@ export function useCamera(videoRef) {
   let zoomPending = null
   // هر بار باز شدن دوربین یک نسل تازه است؛ نتیجهٔ درخواست‌های نسل قبل دور ریخته می‌شود
   let camGen = 0
+  // لنز فوق‌عریضِ همین جهت، اگر مثل آیفون دستگاه جداگانه‌ای باشد
+  let wideDeviceId = null
+  let mainDeviceId = null
 
   const videoTrack = () => stream.value?.getVideoTracks?.()[0] ?? null
+
+  /** دوربین خودش تا چند برابر می‌تواند باز شود؟ ۱ یعنی نمی‌تواند. */
+  const opticalWide = () => (zoomCaps ? zoomCaps.min / zoomCaps.base : 1)
+
+  /**
+   * لنزهای همین جهت را می‌شناسد. برچسب‌ها فقط بعد از اجازهٔ دوربین معنادارند،
+   * پس این بعد از باز شدن استریم صدا زده می‌شود. در iOS برچسب صریح است
+   * («Back Ultra Wide Camera»)؛ در اندروید معمولاً نیست و همان بازهٔ zoom
+   * کار را راه می‌اندازد.
+   */
+  async function refreshLenses() {
+    try {
+      const id = videoTrack()?.getSettings?.().deviceId || null
+      if (id && !onWideLens.value) mainDeviceId = id
+
+      const front = facingMode.value === 'user'
+      const cams = (await navigator.mediaDevices.enumerateDevices()).filter(
+        (d) => d.kind === 'videoinput' && d.label
+      )
+      const wide = cams.find(
+        (d) => /ultra.?wide/i.test(d.label) && /front/i.test(d.label) === front
+      )
+      wideDeviceId = wide?.deviceId ?? null
+    } catch {
+      wideDeviceId = null
+    }
+    minZoom.value = wideDeviceId || opticalWide() <= 0.6 ? WIDE_ZOOM : 1
+  }
 
   function readZoomCaps() {
     zoomCaps = null
@@ -77,8 +122,9 @@ export function useCamera(videoRef) {
          مبنا را کمینه بگیریم، اولین لمسِ دکمه تصویر را بازتر می‌کند نه نزدیک‌تر. */
       const opened = Number(track.getSettings?.().zoom)
       const base = opened > 0 ? opened : z.min
-      if (!(z.max > base)) return
-      zoomCaps = { base, max: z.max }
+      // یا باید بتواند نزدیک‌تر برود یا بازتر؛ وگرنه اصلاً زومی در کار نیست
+      if (!(z.max > base) && !(z.min < base)) return
+      zoomCaps = { min: z.min, base, max: z.max }
       hasOpticalZoom.value = true
     } catch {
       /* مرورگر این قابلیت را ندارد */
@@ -96,7 +142,7 @@ export function useCamera(videoRef) {
     let optical = 1
     const track = videoTrack()
     if (zoomCaps && track) {
-      optical = clamp(target, 1, zoomCaps.max / zoomCaps.base)
+      optical = clamp(target, opticalWide(), zoomCaps.max / zoomCaps.base)
       try {
         await track.applyConstraints({ advanced: [{ zoom: zoomCaps.base * optical }] })
       } catch {
@@ -109,13 +155,29 @@ export function useCamera(videoRef) {
     zoomBusy = false
     // اگر وسط کار دوربین عوض شده باشد، این نتیجه دیگر به درد نمی‌خورد
     if (gen !== camGen) return
-    digitalZoom.value = target / optical
+    // هیچ‌وقت کوچک‌تر از ۱: بازتر شدن کار لنز است نه بوم
+    digitalZoom.value = Math.max(1, target / optical)
     pumpZoom()
   }
 
-  function setZoom(value) {
-    const target = clamp(Number(value) || 1, 1, MAX_ZOOM)
+  /**
+   * @param {number} value ضریب دلخواه
+   * @param {boolean} [allowLens] اجازهٔ عوض کردن خودِ لنز (فقط از منو، نه از
+   *   حرکت دو انگشت؛ باز شدن دوبارهٔ دوربین وسط حرکت انگشت آزاردهنده است)
+   */
+  async function setZoom(value, allowLens = false) {
+    const target = clamp(Number(value) || 1, minZoom.value, MAX_ZOOM)
     if (Math.abs(target - zoom.value) < 0.005 && zoomPending === null) return
+
+    // اگر فوق‌عریض لنز جداگانه است، رفت‌وبرگشت یعنی باز کردن همان لنز
+    const needsWide = target < 1
+    if (allowLens && wideDeviceId && opticalWide() > 0.6 && needsWide !== onWideLens.value) {
+      await start(facingMode.value, needsWide ? wideDeviceId : mainDeviceId)
+      // برگشت از فوق‌عریض روی ۱× می‌نشیند؛ اگر کاربر ۲× خواسته بود، همان‌جا اعمال شود
+      if (!needsWide && target > 1) await setZoom(target)
+      return
+    }
+
     zoom.value = target
     zoomPending = target
     pumpZoom()
@@ -132,7 +194,11 @@ export function useCamera(videoRef) {
     }
   }
 
-  async function start(mode = facingMode.value) {
+  /**
+   * @param {string} mode 'user' | 'environment'
+   * @param {string|null} [deviceId] لنز مشخص (فوق‌عریض یا برگشت به معمولی)
+   */
+  async function start(mode = facingMode.value, deviceId = null) {
     if (starting.value) return
     starting.value = true
     error.value = null
@@ -167,21 +233,40 @@ export function useCamera(videoRef) {
       const portrait = window.innerHeight >= window.innerWidth
       const long = 1920
       const short = 1080
-      const s = await navigator.mediaDevices.getUserMedia({
-        audio: false,
-        video: {
-          facingMode: { ideal: mode },
-          width: { ideal: portrait ? short : long },
-          height: { ideal: portrait ? long : short },
-        },
-      })
+      const size = {
+        width: { ideal: portrait ? short : long },
+        height: { ideal: portrait ? long : short },
+      }
+
+      let wanted = deviceId
+      let s = null
+      if (wanted) {
+        try {
+          s = await navigator.mediaDevices.getUserMedia({
+            audio: false,
+            video: { ...size, deviceId: { exact: wanted } },
+          })
+        } catch {
+          // این لنز نشد؛ بی‌سروصدا برمی‌گردیم روی دوربین معمولی
+          wanted = null
+        }
+      }
+      if (!s) {
+        s = await navigator.mediaDevices.getUserMedia({
+          audio: false,
+          video: { ...size, facingMode: { ideal: mode } },
+        })
+      }
       stream.value = s
-      // هر بار که دوربین باز می‌شود، بزرگ‌نمایی از ۱× شروع می‌شود
+      /* هر بار که دوربین باز می‌شود بزرگ‌نمایی از ۱× شروع می‌شود — مگر اینکه
+         عمداً لنز فوق‌عریض را باز کرده باشیم، که خودش یعنی ۰٫۵×. */
       camGen++
-      zoom.value = 1
+      onWideLens.value = Boolean(wanted) && wanted === wideDeviceId
+      zoom.value = onWideLens.value ? WIDE_ZOOM : 1
       digitalZoom.value = 1
       zoomPending = null
       readZoomCaps()
+      refreshLenses()
 
       const v = videoRef.value
       if (!v) {
@@ -245,8 +330,10 @@ export function useCamera(videoRef) {
     error,
     needsTap,
     zoom,
+    minZoom,
     digitalZoom,
     hasOpticalZoom,
+    onWideLens,
     setZoom,
     isMirrored,
     start,

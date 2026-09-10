@@ -40,14 +40,20 @@ function nailPath(ctx, len, wid) {
 
 export function createNailRenderer() {
   let model = null
-  // برای هر دست یک بانک فیلتر جدا
-  const filters = [
-    new LandmarkFilter({ minCutOff: 1.4, beta: 0.1 }),
-    new LandmarkFilter({ minCutOff: 1.4, beta: 0.1 }),
-  ]
-  // کلید بر اساس چپ/راست بودن دست، نه ترتیب در آرایه — چون ترتیب بین
-  // فریم‌ها جابه‌جا می‌شود و آن‌وقت نرم‌سازیِ یک دست روی دست دیگر می‌افتد.
+  /* هر دست بانک فیلتر خودش را دارد و کلیدش چپ/راست بودنِ همان دست است، نه
+     ترتیبش در آرایه — چون ترتیب بین فریم‌ها جابه‌جا می‌شود و آن‌وقت نرم‌سازیِ
+     یک دست روی دست دیگر می‌افتد و ناخن‌ها می‌پرند. */
+  const filters = new Map()
   const facingSmooth = new Map()
+
+  const filterFor = (key) => {
+    let f = filters.get(key)
+    if (!f) {
+      f = new LandmarkFilter({ minCutOff: 1.4, beta: 0.1 })
+      filters.set(key, f)
+    }
+    return f
+  }
 
   return {
     id: 'nail',
@@ -58,7 +64,7 @@ export function createNailRenderer() {
     },
 
     reset() {
-      filters.forEach((f) => f.reset())
+      filters.clear()
       facingSmooth.clear()
     },
 
@@ -67,11 +73,16 @@ export function createNailRenderer() {
       const res = model.detectForVideo(video, ts)
       const hands = res?.landmarks
       if (!hands?.length) return null
+      const seen = new Set()
       return {
-        hands: hands.slice(0, 2).map((lm, i) => ({
-          landmarks: filters[i].apply(lm, ts),
-          handedness: res.handedness?.[i]?.[0]?.categoryName ?? null,
-        })),
+        hands: hands.slice(0, 2).map((lm, i) => {
+          const handedness = res.handedness?.[i]?.[0]?.categoryName ?? null
+          // اگر مدل هر دو را یک‌جور برچسب زد، ترتیب فقط همان‌جا جدا‌کننده می‌شود
+          let key = handedness ?? `h${i}`
+          if (seen.has(key)) key = `${key}-${i}`
+          seen.add(key)
+          return { landmarks: filterFor(key).apply(lm, ts), handedness }
+        }),
       }
     },
 
@@ -199,8 +210,12 @@ function drawNail(ctx, lm, finger, item, frame, alpha, handScale) {
   ctx.save()
   ctx.globalAlpha = alpha
   ctx.translate(cx, cy)
-  // مسیر در فضای محلی «طول رو به نوک» تعریف شده، پس ۹۰ درجه اضافه می‌شود
-  ctx.rotate(ang + Math.PI / 2)
+  /* مسیر در فضای محلی طوری تعریف شده که +y سمت نوک انگشت است. بوم با
+     rotate(θ) نقطهٔ (0,1) را به (−sinθ, cosθ) می‌برد؛ برای اینکه این بردار
+     همان جهتِ DIP→نوک یعنی (cos ang, sin ang) شود، θ باید ang − ۹۰ باشد.
+     با ang + ۹۰ ناخن دقیقاً ۱۸۰ درجه برعکس می‌افتاد: کوتیکول روی نوک انگشت
+     و لبهٔ آزاد رو به مفصل. */
+  ctx.rotate(ang - Math.PI / 2)
 
   nailPath(ctx, len, wid)
   ctx.save()

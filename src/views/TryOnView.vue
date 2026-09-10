@@ -64,13 +64,19 @@ const loop = useTryOnLoop({
 const ZOOM_STEPS = [1, 1.5, 2, 3]
 const zoomOpen = ref(false)
 
+/* ۰٫۵× فقط جایی نشان داده می‌شود که دستگاه واقعاً لنز فوق‌عریض داشته باشد؛
+   دکمه‌ای که روی گوشیِ دمو کاری نکند، از نبودنش بدتر است. */
+const zoomSteps = computed(() =>
+  camera.minZoom.value < 1 ? [camera.minZoom.value, ...ZOOM_STEPS] : ZOOM_STEPS
+)
+
 const zoomText = (z) =>
   `${fa(Number.isInteger(z) ? String(z) : z.toFixed(1)).replace('.', '٫')}×`
 const zoomLabel = computed(() => zoomText(camera.zoom.value))
 const isZoom = (z) => Math.abs(camera.zoom.value - z) < 0.05
 
 function chooseZoom(z) {
-  camera.setZoom(z)
+  camera.setZoom(z, true)
   zoomOpen.value = false
 }
 
@@ -91,6 +97,9 @@ function onPinchStart(e) {
   }
 }
 function onPinchMove(e) {
+  // روی لنز فوق‌عریض، بزرگ‌نمایی یعنی باز کردن دوبارهٔ دوربین؛ آن هم نه وسط
+  // حرکت انگشت. برگشتن به ۱× از منو انجام می‌شود.
+  if (camera.onWideLens.value) return
   if (!touches.has(e.pointerId)) return
   touches.set(e.pointerId, e)
   if (touches.size !== 2) return
@@ -210,8 +219,10 @@ const onVisible = async () => {
 document.addEventListener('visibilitychange', onVisible)
 onBeforeUnmount(() => document.removeEventListener('visibilitychange', onVisible))
 
+/* هر استریم تازه — چه چرخاندن دوربین، چه عوض شدن لنز — یعنی تصویر عوض شده و
+   ردیابی باید از نو شروع شود. */
 watch(
-  () => camera.facingMode.value,
+  () => camera.stream.value,
   () => {
     loop.resetTracking()
     renderer.value?.reset?.()
@@ -433,7 +444,7 @@ const busyPct = computed(() =>
           <transition name="zoom-pop">
             <div v-if="zoomOpen" class="zoom-menu" role="listbox" aria-label="بزرگ‌نمایی">
               <button
-                v-for="z in ZOOM_STEPS"
+                v-for="z in zoomSteps"
                 :key="z"
                 class="zoom-item"
                 :class="{ on: isZoom(z) }"
