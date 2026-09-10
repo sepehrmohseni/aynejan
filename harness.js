@@ -59,7 +59,7 @@ async function main() {
   const frame = {
     sx: 0, sy: 0, sw: W, sh: H,
     dx: 0, dy: 0, dw: W, dh: H,
-    vw: W, vh: H, W, H, mirror, alpha: 1,
+    vw: W, vh: H, W, H, VH: H, mirror, alpha: 1,
     map(lm) {
       const xv = mirror ? (1 - lm.x) * W : lm.x * W
       return { x: xv, y: lm.y * H }

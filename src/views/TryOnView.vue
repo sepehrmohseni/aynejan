@@ -55,24 +55,24 @@ const loop = useTryOnLoop({
   getRenderer: () => (modelState.value === 'ready' ? renderer.value : null),
   getItem: () => current.value,
   isMirrored: camera.isMirrored,
-  getSafeBottom: () => safeBottom.value,
   getZoom: () => camera.digitalZoom.value,
 })
 
 /* ------------------------------------------------------------ بزرگ‌نمایی */
-/* پله‌ها همان‌هایی‌اند که در دوربین گوشی هم هست، تا آشنا باشد. با هر زدنِ
-   دکمه یک پله جلو می‌رود و از آخری به ۱× برمی‌گردد. */
+/* پله‌ها همان‌هایی‌اند که در دوربین گوشی هست، تا آشنا باشد. با یک لمس همه‌شان
+   با هم دیده می‌شوند و کاربر مستقیم همان را که می‌خواهد می‌زند. */
 const ZOOM_STEPS = [1, 1.5, 2, 3]
+const zoomOpen = ref(false)
 
-function cycleZoom() {
-  const next = ZOOM_STEPS.find((z) => z > camera.zoom.value + 0.01)
-  camera.setZoom(next ?? ZOOM_STEPS[0])
+const zoomText = (z) =>
+  `${fa(Number.isInteger(z) ? String(z) : z.toFixed(1)).replace('.', '٫')}×`
+const zoomLabel = computed(() => zoomText(camera.zoom.value))
+const isZoom = (z) => Math.abs(camera.zoom.value - z) < 0.05
+
+function chooseZoom(z) {
+  camera.setZoom(z)
+  zoomOpen.value = false
 }
-
-const zoomLabel = computed(() => {
-  const z = camera.zoom.value
-  return fa(Number.isInteger(z) ? String(z) : z.toFixed(1)).replace('.', '٫')
-})
 
 /* دو انگشت روی تصویر هم بزرگ‌نمایی می‌کند — چیزی که هر کسی از یک دوربین
    انتظار دارد و لازم نیست جایی نوشته شود. */
@@ -215,6 +215,7 @@ watch(
   () => {
     loop.resetTracking()
     renderer.value?.reset?.()
+    zoomOpen.value = false
   }
 )
 
@@ -299,6 +300,7 @@ const busyPct = computed(() =>
     <canvas
       ref="canvasRef"
       class="stage"
+      :style="{ height: `calc(100% - ${safeBottom}px)` }"
       @pointerdown="onPinchStart"
       @pointermove="onPinchMove"
       @pointerup="onPinchEnd"
@@ -382,6 +384,8 @@ const busyPct = computed(() =>
       </transition>
     </div>
 
+    <div v-if="zoomOpen" class="scrim" @click="zoomOpen = false" aria-hidden="true"></div>
+
     <div ref="bottomRef" class="bottom">
       <div ref="carouselRef" class="carousel no-bar" role="listbox" aria-label="انتخاب آیتم">
         <button
@@ -425,14 +429,35 @@ const busyPct = computed(() =>
           <span class="core"><v-icon icon="mdi-camera-iris" size="34" /></span>
         </button>
 
-        <button
-          class="round on-camera tap dock-btn zoom"
-          type="button"
-          :aria-label="`تغییر بزرگ‌نمایی؛ الان ${zoomLabel} برابر`"
-          @click="cycleZoom"
-        >
-          <span dir="ltr">{{ zoomLabel }}×</span>
-        </button>
+        <div class="zoom-wrap dock-btn">
+          <transition name="zoom-pop">
+            <div v-if="zoomOpen" class="zoom-menu" role="listbox" aria-label="بزرگ‌نمایی">
+              <button
+                v-for="z in ZOOM_STEPS"
+                :key="z"
+                class="zoom-item"
+                :class="{ on: isZoom(z) }"
+                type="button"
+                role="option"
+                :aria-selected="isZoom(z)"
+                @click="chooseZoom(z)"
+              >
+                <span dir="ltr">{{ zoomText(z) }}</span>
+              </button>
+            </div>
+          </transition>
+          <button
+            class="round on-camera tap zoom-btn"
+            :class="{ active: camera.zoom.value > 1 }"
+            type="button"
+            aria-haspopup="listbox"
+            :aria-expanded="zoomOpen"
+            :aria-label="`بزرگ‌نمایی، الان ${zoomLabel}`"
+            @click="zoomOpen = !zoomOpen"
+          >
+            <span dir="ltr">{{ zoomLabel }}</span>
+          </button>
+        </div>
       </div>
     </div>
 
@@ -450,7 +475,8 @@ const busyPct = computed(() =>
 .tryon {
   position: fixed;
   inset: 0;
-  background: #000;
+  /* زیر نوار دکمه‌ها دیگر تصویر نیست، پس همان تیرگیِ خود اپ می‌نشیند */
+  background: #0a060c;
   overflow: hidden;
 }
 .hidden-video {
@@ -462,9 +488,10 @@ const busyPct = computed(() =>
 }
 .stage {
   position: absolute;
-  inset: 0;
+  top: 0;
+  inset-inline: 0;
   width: 100%;
-  height: 100%;
+  /* ارتفاعش تا بالای نوار دکمه‌هاست؛ مقدارش درون‌خطی بسته می‌شود */
   display: block;
   /* بوم دقیقاً به اندازهٔ برشی است که کشیده شده، پس کشیدگی ایجاد نمی‌شود */
   object-fit: fill;
@@ -606,15 +633,9 @@ const busyPct = computed(() =>
   inset-inline: 0;
   bottom: 0;
   padding: 10px 12px calc(var(--safe-b) + 10px);
-  /* بالای نوار یک محو شدن نرم، پایینش تیرهٔ توپر — چون تصویر دوربین اصلاً
-     زیر این نوار نمی‌آید، لبه نباید سخت دیده شود. */
-  background: linear-gradient(
-    to top,
-    rgba(10, 6, 12, 0.96) 0%,
-    rgba(10, 6, 12, 0.94) 62%,
-    rgba(10, 6, 12, 0.6) 88%,
-    rgba(10, 6, 12, 0) 100%
-  );
+  /* تصویر دقیقاً بالای همین نوار تمام می‌شود، پس این‌جا فقط زمینهٔ خود اپ است
+     و لبهٔ تصویر تمیز و عمدی دیده می‌شود. */
+  background: #0a060c;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -681,10 +702,86 @@ const busyPct = computed(() =>
 .dock-btn {
   justify-self: center;
 }
-.zoom {
+/* --------------------------------------------------------- بزرگ‌نمایی */
+.zoom-wrap {
+  position: relative;
+  z-index: 9;
+  width: 44px;
+  height: 44px;
+}
+.scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 8;
+}
+.zoom-btn {
   font-weight: 700;
-  font-size: 15px;
+  font-size: 14px;
   line-height: 1;
+  transition: box-shadow 0.18s ease, color 0.18s ease;
+}
+/* وقتی روی ۱× نیستیم، خودِ دکمه می‌گوید که بزرگ‌نمایی روشن است */
+.zoom-btn.active {
+  color: var(--c-zaferan);
+  box-shadow: inset 0 0 0 1.5px var(--c-zaferan);
+}
+.zoom-menu {
+  position: absolute;
+  bottom: calc(100% + 12px);
+  inset-inline-end: -3px;
+  display: flex;
+  /* ۱× پایین و نزدیک دکمه، هرچه بالاتر نزدیک‌تر — مثل خودِ حرکتِ زوم */
+  flex-direction: column-reverse;
+  gap: 6px;
+  padding: 7px;
+  border-radius: 27px;
+  background: rgba(20, 13, 22, 0.66);
+  backdrop-filter: blur(20px) saturate(140%);
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
+  box-shadow:
+    0 12px 32px rgba(0, 0, 0, 0.5),
+    inset 0 0 0 1px rgba(247, 233, 236, 0.16);
+}
+.zoom-item {
+  width: 44px;
+  height: 44px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--c-golab);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  transition: transform 0.16s ease, background 0.16s ease;
+}
+.zoom-item:active {
+  transform: scale(0.92);
+}
+.zoom-item.on {
+  background: linear-gradient(155deg, var(--c-anar-soft), var(--c-anar));
+  color: #fff;
+  box-shadow: 0 4px 14px rgba(180, 35, 76, 0.55);
+}
+.zoom-item:focus-visible {
+  outline: 3px solid var(--c-zaferan);
+  outline-offset: 2px;
+}
+.zoom-pop-enter-active {
+  transition: opacity 0.18s ease, transform 0.26s cubic-bezier(0.2, 1.35, 0.4, 1);
+  transform-origin: bottom center;
+}
+.zoom-pop-leave-active {
+  transition: opacity 0.14s ease, transform 0.14s ease;
+  transform-origin: bottom center;
+}
+.zoom-pop-enter-from,
+.zoom-pop-leave-to {
+  opacity: 0;
+  transform: translateY(10px) scale(0.86);
 }
 .round-spacer {
   width: 44px;
