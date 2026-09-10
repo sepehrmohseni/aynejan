@@ -1,0 +1,39 @@
+# وابستگی‌ها
+node_modules/
+.pnpm-store/
+
+# خروجی ساخت
+dist/
+dist-ssr/
+*.local
+
+# مدل‌ها و WASM مدیاپایپ — با اسکریپت setup دوباره ساخته می‌شوند
+public/mediapipe/wasm/
+public/mediapipe/models/
+
+# تصاویر آزمایش محلی (در build نهایی نیستند)
+devtest/
+
+# ابزار و ویرایشگر
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# لاگ‌ها
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# محیط
+.env
+.env.*
+!.env.example
